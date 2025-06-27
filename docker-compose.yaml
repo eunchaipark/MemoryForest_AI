@@ -1,0 +1,58 @@
+version: '3'
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_db:/var/lib/postgresql/data
+    restart: always
+
+  webserver:
+    build:
+      context: .
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'hZcmA6xxcbOcyujscbaeRKkl3LLYkSxZVO91StuzEsE='
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'hZcmA6xxcbOcyujscbaeRKkl3LLYkSxZVO91StuzEsE='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./models:/opt/airflow/models
+      - ./data:/opt/airflow/data
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "airflow webserver"
+    restart: always
+
+  scheduler:
+    build:
+      context: .
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'hZcmA6xxcbOcyujscbaeRKkl3LLYkSxZVO91StuzEsE='
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'hZcmA6xxcbOcyujscbaeRKkl3LLYkSxZVO91StuzEsE='
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./models:/opt/airflow/models
+      - ./data:/opt/airflow/data
+    command: airflow scheduler
+    restart: always
+
+volumes:
+  postgres_db:
