@@ -1,6 +1,8 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime
+import csv
+import time
 import os
 import pandas as pd
 from gensim.models import Word2Vec
@@ -10,6 +12,7 @@ import pendulum
 local_tz = pendulum.timezone("Asia/Seoul")
 
 def train_word2vec():
+    start_time = time.time()
     # 날짜 기준 파일 경로 설정
     today_str = datetime.now().strftime("%Y%m%d")
     csv_path = f"/opt/airflow/data/blogjson_{today_str}/sentence_level_sentiment_with_scores.csv"
@@ -40,6 +43,45 @@ def train_word2vec():
     )
     model.save(model_save_path)
     print(f"Word2Vec 모델 저장 완료: {model_save_path}")
+
+    # 모델 학습 및 저장 후 추가
+    train_stats_path = "/opt/airflow/data/word2vec_train_stats.csv"
+    train_date = datetime.now().strftime("%Y-%m-%d")
+    train_time = datetime.now().strftime("%H:%M:%S")
+
+    # 모델 정보 추출
+    train_time_sec = round(time.time() - start_time, 2)
+    vocab_size = len(model.wv)
+    vector_size = model.vector_size
+    raw_word_count = model.corpus_total_words
+    effective_word_count = model.corpus_count
+    words_per_sec = int(effective_word_count / train_time_sec)
+    alpha = model.alpha
+
+
+    # 파일이 없다면 헤더 먼저 쓰기
+    file_exists = os.path.exists(train_stats_path)
+    with open(train_stats_path, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        if not file_exists:
+            writer.writerow([
+                'date', 'time', 'vocab_size', 'vector_size',
+                'total_raw_words', 'effective_words', 'train_time_sec',
+                'words_per_sec', 'alpha', 'model_path'
+            ])
+        writer.writerow([
+            datetime.now().strftime("%Y-%m-%d"),
+            datetime.now().strftime("%H:%M:%S"),
+            vocab_size,
+            vector_size,
+            raw_word_count,
+            effective_word_count,
+            train_time_sec,
+            words_per_sec,
+            alpha,
+            model_save_path
+    ])
+
 
 default_args = {
     'start_date': datetime(2025, 6, 17),
