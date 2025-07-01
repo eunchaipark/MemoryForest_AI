@@ -1,7 +1,8 @@
 numpy
 konlpy
-fasttext
+fasttext-wheel
 requests         # 뉴스 크롤링 시 HTTP 요청용
 beautifulsoup4   # 뉴스 크롤링 시 HTML 파싱용
 lxml             # HTML 파싱 성능 향상을 위해 (선택)
 pandas           # 데이터 처리용 (필요하면)
+gensim
