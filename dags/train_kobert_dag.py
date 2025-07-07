@@ -105,7 +105,7 @@ def train_model():
 
 
 # --------------------------
-# Airflow DAG definition
+# Airflow DAG 
 # --------------------------
 
 default_args = {
