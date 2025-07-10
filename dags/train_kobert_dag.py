@@ -13,13 +13,17 @@ from airflow.operators.python import PythonOperator
 import os
 import csv
 
-
 local_tz = pendulum.timezone("Asia/Seoul")
 
+def train_model(folder_date: str = None):
+    if folder_date is None:
+        folder_date = datetime.now().strftime("%Y%m%d")
 
-def train_model():
-    today_str = datetime.now().strftime("%Y%m%d")
-    csv_path = f'/opt/airflow/data/blogjson_{today_str}/sentence_level_sentiment_with_scores.csv'
+    # 감정 분석 결과가 저장된 경로 (주제별 데이터를 통합 저장하는 날짜 폴더)
+    csv_path = f'/opt/airflow/data/sentiment_results/{folder_date}/sentence_level_sentiment_with_scores.csv'
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV 파일을 찾을 수 없습니다: {csv_path}")
+
     df = pd.read_csv(csv_path)
 
     texts = df['text'].tolist()
@@ -80,7 +84,6 @@ def train_model():
 
     trainer.train()
 
-    # 평가 결과 받아오기
     results = trainer.evaluate()
 
     metrics_file = '/opt/airflow/data/metrics.csv'
@@ -94,7 +97,6 @@ def train_model():
         results.get('eval_recall', '')
     ]
 
-    # 파일이 없으면 쓰기 있으면 append
     file_exists = os.path.isfile(metrics_file)
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     with open(metrics_file, mode='a', newline='', encoding='utf-8') as f:
@@ -103,9 +105,8 @@ def train_model():
             writer.writerow(['date', 'time', 'accuracy', 'f1', 'precision', 'recall'])
         writer.writerow(row)
 
-
 # --------------------------
-# Airflow DAG 
+# Airflow DAG
 # --------------------------
 
 default_args = {
@@ -118,7 +119,7 @@ default_args = {
 with DAG(
     dag_id='kobert_finetune_dag',
     default_args=default_args,
-    schedule_interval= None, 
+    schedule_interval=None,
     start_date=pendulum.datetime(2025, 6, 17, tz=local_tz),
     catchup=False,
     tags=['ml', 'kobert']
@@ -127,6 +128,5 @@ with DAG(
     train_kobert_task = PythonOperator(
         task_id='train_kobert_model',
         python_callable=train_model,
+        op_kwargs={'folder_date': datetime.now().strftime('%Y%m%d')}  # 날짜 인자를 넘겨줍니다.
     )
-
-    train_kobert_task
