@@ -55,7 +55,7 @@ def train_word2vec(folder_date: str = None):
                 similarities.append(sim)
         return round(np.mean(similarities), 4) if similarities else 0.0
 
-    common_words = ['음식', '강아지', '기쁨', '바다', '고통']
+    common_words = ['음식', '강아지', '기쁨', '바다', '고통','손자','손녀','꽃', '자동차','사과','축구','초등학교','양복','회사원']
     baseline_similarity = 0.0
     restored = False
 
