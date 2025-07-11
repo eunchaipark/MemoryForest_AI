@@ -45,7 +45,7 @@ def run_sentiment_analysis(folder_date: str = None):
         folder_date = datetime.now().strftime("%Y%m%d")
 
     # 수정된 경로: 주제 폴더 하위 날짜별 json 파일들을 모두 읽음
-    input_path = os.path.join(DATA_BASE_PATH, "*", folder_date, "*_blog.json")
+    input_path = os.path.join(DATA_BASE_PATH, "**", folder_date, "*_blog.json")
     texts = preprocess_blog_json(input_path)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
