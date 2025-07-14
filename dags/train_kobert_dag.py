@@ -19,12 +19,14 @@ def train_model(folder_date: str = None):
     if folder_date is None:
         folder_date = datetime.now().strftime("%Y%m%d")
 
-    # 감정 분석 결과가 저장된 경로 (주제별 데이터를 통합 저장하는 날짜 폴더)
     csv_path = f'/opt/airflow/data/sentiment_results/{folder_date}/sentence_level_sentiment_with_scores.csv'
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV 파일을 찾을 수 없습니다: {csv_path}")
 
     df = pd.read_csv(csv_path)
+
+    # 데이터 샘플링 (메모리 절약)
+    df = df.sample(frac=0.4, random_state=42)
 
     texts = df['text'].tolist()
     labels = df['label'].tolist()
@@ -34,10 +36,10 @@ def train_model(folder_date: str = None):
     )
 
     model_dir = "/opt/airflow/models/saved_kobert_model"
-    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=True)
 
     class SentimentDataset(Dataset):
-        def __init__(self, texts, labels, tokenizer, max_length=256):
+        def __init__(self, texts, labels, tokenizer, max_length=128):
             self.encodings = tokenizer(texts, truncation=True, padding=True, max_length=max_length)
             self.labels = labels
 
@@ -63,15 +65,13 @@ def train_model(folder_date: str = None):
 
     training_args = TrainingArguments(
         output_dir='/opt/airflow/models/kobert_finetuned',
-        num_train_epochs=3,
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
+        num_train_epochs=2,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
         eval_strategy="epoch",
-        save_strategy="epoch",
+        save_strategy="no",
         logging_dir='/opt/airflow/logs',
-        logging_steps=50,
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
+        logging_steps=100,
     )
 
     trainer = Trainer(
@@ -97,8 +97,8 @@ def train_model(folder_date: str = None):
         results.get('eval_recall', '')
     ]
 
-    file_exists = os.path.isfile(metrics_file)
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
+    file_exists = os.path.isfile(metrics_file)
     with open(metrics_file, mode='a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -106,7 +106,7 @@ def train_model(folder_date: str = None):
         writer.writerow(row)
 
 # --------------------------
-# Airflow DAG
+# Airflow DAG 설정
 # --------------------------
 
 default_args = {
@@ -128,5 +128,5 @@ with DAG(
     train_kobert_task = PythonOperator(
         task_id='train_kobert_model',
         python_callable=train_model,
-        op_kwargs={'folder_date': datetime.now().strftime('%Y%m%d')}  # 날짜 인자를 넘겨줍니다.
+        op_kwargs={'folder_date': datetime.now().strftime('%Y%m%d')}
     )

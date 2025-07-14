@@ -54,8 +54,15 @@ def train_word2vec(folder_date: str = None):
                 sim = dot(vectors[i], vectors[j]) / (norm(vectors[i]) * norm(vectors[j]))
                 similarities.append(sim)
         return round(np.mean(similarities), 4) if similarities else 0.0
+    
+    
+# 카테고리별 평가 단어 1개씩 
+    common_words = [
+    "부모", "유럽", "기쁨", "고양이", "김치찌개", "출근", "축구", "칫솔",
+    "냉장고", "선인장", "호랑이", "불교", "병원", "청바지", "졸업식", "독서",
+    "봄비", "교과서", "간호사", "부산", "지하철", "박물관", "연극", "생일", "유치원"
+]
 
-    common_words = ['음식', '강아지', '기쁨', '바다', '고통','손자','손녀','꽃', '자동차','사과','축구','초등학교','양복','회사원']
     baseline_similarity = 0.0
     restored = False
 
