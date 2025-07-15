@@ -1,19 +1,23 @@
 # dags/train_kobert_dag.py
 
-import pandas as pd
-import torch
-from torch.utils.data import Dataset
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from datetime import datetime, timedelta
-import pendulum
-from airflow import DAG
-from airflow.operators.python import PythonOperator
 import os
 import csv
+import torch
+import pendulum
+import pandas as pd
+from datetime import datetime, timedelta
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from torch.utils.data import Dataset
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from airflow import DAG
+from airflow.operators.python import PythonOperator
 
 local_tz = pendulum.timezone("Asia/Seoul")
+
+# 가중치 설정
+F1_WEIGHT = 0.6
+RECALL_WEIGHT = 0.4
 
 def train_model(folder_date: str = None):
     if folder_date is None:
@@ -23,10 +27,7 @@ def train_model(folder_date: str = None):
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV 파일을 찾을 수 없습니다: {csv_path}")
 
-    df = pd.read_csv(csv_path)
-
-    # 데이터 샘플링 (메모리 절약)
-    df = df.sample(frac=0.4, random_state=42)
+    df = pd.read_csv(csv_path).sample(frac=0.4, random_state=42)
 
     texts = df['text'].tolist()
     labels = df['label'].tolist()
@@ -35,8 +36,9 @@ def train_model(folder_date: str = None):
         texts, labels, test_size=0.2, random_state=42
     )
 
-    model_dir = "/opt/airflow/models/saved_kobert_model"
-    tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=True)
+    saved_model_path = "/opt/airflow/models/saved_kobert_model"
+    backup_model_path = "/opt/airflow/models/saved_kobert_model_backup"
+    tokenizer = AutoTokenizer.from_pretrained(saved_model_path, use_fast=True)
 
     class SentimentDataset(Dataset):
         def __init__(self, texts, labels, tokenizer, max_length=128):
@@ -54,7 +56,7 @@ def train_model(folder_date: str = None):
     train_dataset = SentimentDataset(train_texts, train_labels, tokenizer)
     val_dataset = SentimentDataset(val_texts, val_labels, tokenizer)
 
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir, num_labels=2)
+    model = AutoModelForSequenceClassification.from_pretrained(saved_model_path, num_labels=2)
 
     def compute_metrics(pred):
         labels = pred.label_ids
@@ -83,23 +85,56 @@ def train_model(folder_date: str = None):
     )
 
     trainer.train()
-
     results = trainer.evaluate()
 
-    metrics_file = '/opt/airflow/data/metrics.csv'
+    # 성능 점수 계산
+    accuracy = results.get("eval_accuracy", 0)
+    f1 = results.get("eval_f1", 0)
+    precision = results.get("eval_precision", 0)
+    recall = results.get("eval_recall", 0)
+    new_score = (f1 * F1_WEIGHT) + (recall * RECALL_WEIGHT)
+
+    # 이전 점수 불러오기
+    metric_path = '/opt/airflow/data/metrics.csv'
+    prev_score = 0.0
+    if os.path.exists(metric_path):
+        with open(metric_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            if len(lines) > 1:
+                last = lines[-1].strip().split(',')
+                try:
+                    prev_f1 = float(last[3])
+                    prev_recall = float(last[5])
+                    prev_score = (prev_f1 * F1_WEIGHT) + (prev_recall * RECALL_WEIGHT)
+                except:
+                    pass
+
+    # 모델 저장 or 롤백
+    if new_score >= prev_score:
+        print("[✔] 새 모델 성능 우수 → 저장 및 백업 갱신")
+        model.save_pretrained(saved_model_path)
+        tokenizer.save_pretrained(saved_model_path)
+
+        if os.path.exists(backup_model_path):
+            os.system(f"rm -rf {backup_model_path}")
+        os.system(f"cp -r {saved_model_path} {backup_model_path}")
+    else:
+        print("[✘] 새 모델 성능 저하 → 백업 모델 유지")
+
+    # metrics.csv 저장
     now = datetime.now()
     row = [
         now.strftime("%Y-%m-%d"),
         now.strftime("%H:%M:%S"),
-        results.get('eval_accuracy', ''),
-        results.get('eval_f1', ''),
-        results.get('eval_precision', ''),
-        results.get('eval_recall', '')
+        round(accuracy, 4),
+        round(f1, 4),
+        round(precision, 4),
+        round(recall, 4),
     ]
 
-    os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
-    file_exists = os.path.isfile(metrics_file)
-    with open(metrics_file, mode='a', newline='', encoding='utf-8') as f:
+    os.makedirs(os.path.dirname(metric_path), exist_ok=True)
+    file_exists = os.path.isfile(metric_path)
+    with open(metric_path, mode='a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(['date', 'time', 'accuracy', 'f1', 'precision', 'recall'])
@@ -117,7 +152,7 @@ default_args = {
 }
 
 with DAG(
-    dag_id='kobert_finetune_dag',
+    dag_id='kobert_finetune_with_weighted_backup',
     default_args=default_args,
     schedule_interval=None,
     start_date=pendulum.datetime(2025, 6, 17, tz=local_tz),
