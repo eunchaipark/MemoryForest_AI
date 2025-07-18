@@ -34,15 +34,54 @@ def train_word2vec(folder_date: str = None):
     df = pd.read_csv(csv_path)
     texts = df['text'].dropna().drop_duplicates()
 
+        # 불용어 리스트 (원하는 만큼 추가 가능)
+    stopwords = [
+    # 대명사, 지시어, 의문사
+    "이", "그", "저", "것", "거", "게", "내", "너", "나", "우리", "저희", "누구", "뭐", "왜", "어디", "어느", "어떻게", "무엇", "누가",
+
+    # 접속사, 부사
+    "또한", "그리고", "그러나", "하지만", "그래서", "그러면", "그런데", "즉", "혹은", "또", "및", "혹시", "따라서",
+    "좀", "듯", "같이", "같은", "자주", "항상", "다시", "매우", "너무", "거의", "별로", "오히려", "결국", "사실", "그냥",
+    "이미", "전혀", "계속", "아주", "정말", "진짜", "그다지", "그래도", "그러니까", "게다가", "정도",
+
+    # 조사
+    "에서", "으로", "까지", "부터", "보다", "하고", "이랑", "랑", "의", "에", "와", "과", "는", "은", "이", "가", "도", "만", "으로서", "으로써",
+
+    # 시간/위치 관련
+    "때", "곳", "건", "중", "간", "전", "후", "동안", "앞", "뒤", "안", "밖", "위", "아래", "옆", "이후", "이전",
+
+    # 동사 활용형 (불필요한 문장 구성용)
+    "한다", "했다", "하게", "하여", "하는", "하면", "되다", "되며", "된다", "된다면", "되었으며", "되어", "되고", "되는",
+    "이다", "입니다", "있는", "없는", "있다", "없다", "하였다", "해서", "해서는", "합니다", "합니다만", "하였다가",
+    "하며", "하고자", "하고", "하기", "하는데", "하기에", "하면서", "입니다만", "같습니다", "보입니다", "생각합니다"
+    ]
+
+
+
+    # 토크나이저 설정
     okt = Okt()
 
     def tokenize_text(text):
         allowed_pos = ['Noun', 'Verb', 'Adjective']
-        return [word for word, pos in okt.pos(text, stem=True) if pos in allowed_pos]
+        tokens = [word for word, pos in okt.pos(text, stem=True) if pos in allowed_pos]
+        filtered = [t for t in tokens if t not in stopwords and len(t) > 1]
+        return filtered
 
-    tokenized_sentences = [tokenize_text(line.strip()) for line in texts if line.strip()]
+    # 중복 제거 + 필터 조건에 맞는 문장만 사용
+    seen_sentences = set()
+    tokenized_sentences = []
+
+    for line in texts:
+        line = line.strip()
+        if line and line not in seen_sentences:
+            seen_sentences.add(line)
+            tokens = tokenize_text(line)
+            if len(tokens) >= 3:
+                tokenized_sentences.append(tokens)
+
     all_tokens = [token for sentence in tokenized_sentences for token in sentence]
     total_token_count = len(all_tokens)
+
 
     def average_cosine_similarity(model, words):
         vectors = [model.wv[word] for word in words if word in model.wv]
