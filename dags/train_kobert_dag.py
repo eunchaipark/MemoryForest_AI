@@ -2,6 +2,7 @@
 
 import os
 import csv
+import shutil
 import torch
 import pendulum
 import pandas as pd
@@ -15,7 +16,6 @@ from airflow.operators.python import PythonOperator
 
 local_tz = pendulum.timezone("Asia/Seoul")
 
-# 가중치 설정
 F1_WEIGHT = 0.6
 RECALL_WEIGHT = 0.4
 
@@ -27,8 +27,7 @@ def train_model(folder_date: str = None):
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV 파일을 찾을 수 없습니다: {csv_path}")
 
-    df = pd.read_csv(csv_path).sample(frac=0.4, random_state=42)
-
+    df = pd.read_csv(csv_path).sample(frac=0.5, random_state=42)
     texts = df['text'].tolist()
     labels = df['label'].tolist()
 
@@ -38,6 +37,8 @@ def train_model(folder_date: str = None):
 
     saved_model_path = "/opt/airflow/models/saved_kobert_model"
     backup_model_path = "/opt/airflow/models/saved_kobert_model_backup"
+    temp_model_path = "/opt/airflow/models/saved_kobert_model_temp"
+
     tokenizer = AutoTokenizer.from_pretrained(saved_model_path, use_fast=True)
 
     class SentimentDataset(Dataset):
@@ -56,6 +57,7 @@ def train_model(folder_date: str = None):
     train_dataset = SentimentDataset(train_texts, train_labels, tokenizer)
     val_dataset = SentimentDataset(val_texts, val_labels, tokenizer)
 
+    # 1️⃣ 기존 모델 불러오기 (가중치 유지)
     model = AutoModelForSequenceClassification.from_pretrained(saved_model_path, num_labels=2)
 
     def compute_metrics(pred):
@@ -66,7 +68,7 @@ def train_model(folder_date: str = None):
         return {'accuracy': acc, 'f1': f1, 'precision': precision, 'recall': recall}
 
     training_args = TrainingArguments(
-        output_dir='/opt/airflow/models/kobert_finetuned',
+        output_dir=temp_model_path,
         num_train_epochs=2,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
@@ -87,14 +89,14 @@ def train_model(folder_date: str = None):
     trainer.train()
     results = trainer.evaluate()
 
-    # 성능 점수 계산
+    # 2️⃣ 점수 계산
     accuracy = results.get("eval_accuracy", 0)
     f1 = results.get("eval_f1", 0)
     precision = results.get("eval_precision", 0)
     recall = results.get("eval_recall", 0)
     new_score = (f1 * F1_WEIGHT) + (recall * RECALL_WEIGHT)
 
-    # 이전 점수 불러오기
+    # 3️⃣ 이전 점수 불러오기
     metric_path = '/opt/airflow/data/metrics.csv'
     prev_score = 0.0
     if os.path.exists(metric_path):
@@ -109,19 +111,20 @@ def train_model(folder_date: str = None):
                 except:
                     pass
 
-    # 모델 저장 or 롤백
+    # 4️⃣ 성능 비교 → 저장 여부 결정
     if new_score >= prev_score:
-        print("[✔] 새 모델 성능 우수 → 저장 및 백업 갱신")
+        print("[✔] 성능 향상 → 모델 덮어쓰기 및 백업")
         model.save_pretrained(saved_model_path)
         tokenizer.save_pretrained(saved_model_path)
 
         if os.path.exists(backup_model_path):
-            os.system(f"rm -rf {backup_model_path}")
-        os.system(f"cp -r {saved_model_path} {backup_model_path}")
-    else:
-        print("[✘] 새 모델 성능 저하 → 백업 모델 유지")
+            shutil.rmtree(backup_model_path)
+        shutil.copytree(saved_model_path, backup_model_path)
 
-    # metrics.csv 저장
+    else:
+        print("[✘] 성능 저하 → 기존 모델 유지")
+
+    # 5️⃣ 성능 기록
     now = datetime.now()
     row = [
         now.strftime("%Y-%m-%d"),
@@ -140,9 +143,10 @@ def train_model(folder_date: str = None):
             writer.writerow(['date', 'time', 'accuracy', 'f1', 'precision', 'recall'])
         writer.writerow(row)
 
-# --------------------------
-# Airflow DAG 설정
-# --------------------------
+
+# ----------------------
+# DAG 설정
+# ----------------------
 
 default_args = {
     'owner': 'airflow',
@@ -152,7 +156,7 @@ default_args = {
 }
 
 with DAG(
-    dag_id='kobert_finetune_with_weighted_backup',
+    dag_id='kobert_incremental_training_with_backup',
     default_args=default_args,
     schedule_interval=None,
     start_date=pendulum.datetime(2025, 6, 17, tz=local_tz),
@@ -161,7 +165,7 @@ with DAG(
 ) as dag:
 
     train_kobert_task = PythonOperator(
-        task_id='train_kobert_model',
+        task_id='train_kobert_incrementally',
         python_callable=train_model,
         op_kwargs={'folder_date': datetime.now().strftime('%Y%m%d')}
     )
