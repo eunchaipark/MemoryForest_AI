@@ -54,7 +54,14 @@ def crawl_blog_texts():
     node = 'blog'
 
     category_groups = {
-"스포츠": ["축구공", "농구공", "배드민턴라켓", "탁구채", "운동화", "야구글러브"]
+
+    "동물": [
+    "강아지", "개", "고양이", "반려동물", "사료", "목줄", "진돗개", "새", "병아리", "토끼",
+    "거북이", "물고기", "오리", "닭", "염소", "돼지", "소", "말"
+]
+
+
+
 
 
     }
@@ -73,7 +80,7 @@ def crawl_blog_texts():
                 continue
 
             total = jsonResponse['total']
-            while jsonResponse and jsonResponse['display'] != 0 and cnt < 1000:
+            while jsonResponse and jsonResponse['display'] != 0 and cnt < 300:
                 for post in jsonResponse['items']:
                     cnt += 1
                     getPostData(post, jsonResult, cnt)
